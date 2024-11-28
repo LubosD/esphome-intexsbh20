@@ -69,7 +69,7 @@ void MQTTClient::subscriptionUpdate(char* topic, byte* message, unsigned int len
   publications.erase(willTopic);
 }
 
-void MQTTClient::setup(const char* mqttServer,const char* mqttUsername, const char* mqttPassword, const char* cid, const char* wt, const char* wm)
+void MQTTClient::setup(const char* mqttServer, uint16 mqttPort, const char* mqttUsername, const char* mqttPassword, const char* cid, const char* wt, const char* wm)
 {
   mqttuser = mqttUsername;
   mqttpw = mqttPassword;
@@ -77,7 +77,7 @@ void MQTTClient::setup(const char* mqttServer,const char* mqttUsername, const ch
   willTopic = wt;
   willMessage = wm;
 
-  mqttClient.setServer(mqttServer, 1883);
+  mqttClient.setServer(mqttServer, mqttPort);
   mqttClient.setCallback(std::bind(&MQTTClient::subscriptionUpdate, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 }
 
@@ -185,9 +185,7 @@ bool MQTTClient::publish(const char* topic, const String& message, bool retain, 
       }
       return published;
     }
-    else
-    {
-      return false;
-    }
   }
+
+  return false;
 }

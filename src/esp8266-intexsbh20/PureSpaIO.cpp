@@ -1,7 +1,7 @@
 /*
  * project:  Intex PureSpa SB-H20 WiFi Controller
  *
- * file:     SBH20IO.cpp
+ * file:     PureSpaIO.cpp
  *
  * encoding: UTF-8
  * created:  14th March 2021
@@ -26,10 +26,14 @@
  *
  */
 
-#include "SBH20IO.h"
+#include "PureSpaIO.h"
 
 #include <ESP8266WiFi.h>
 
+
+#if defined MODEL_SB_H20
+
+const char MODEL_NAME[] = "Intex PureSpa SB-H20";
 
 // bit mask for LEDs
 namespace FRAME_LED
@@ -41,6 +45,51 @@ namespace FRAME_LED
   const uint16 BUBBLE         = 0x0400;  // max. 30 min
   const uint16 FILTER         = 0x1000;  // max. 24 h
 }
+
+// bit mask of button
+namespace FRAME_BUTTON
+{
+  const uint16 POWER     = 0x0400;
+  const uint16 FILTER    = 0x0002;
+  const uint16 HEATER    = 0x8000;
+  const uint16 BUBBLE    = 0x0008;
+  const uint16 TEMP_UP   = 0x1000;
+  const uint16 TEMP_DOWN = 0x0080;
+  const uint16 TEMP_UNIT = 0x2000;
+}
+
+#elif defined MODEL_SJB_HS
+
+const char MODEL_NAME[] = "Intex PureSpa SJB-HS";
+
+// bit mask for LEDs
+namespace FRAME_LED
+{
+  const uint16 POWER          = 0x0001;
+  const uint16 BUBBLE         = 0x0002;  // max. 30 min
+  const uint16 HEATER_ON      = 0x0080;  // max. 72 h, will start filter, will not stop filter
+  const uint16 NO_BEEP        = 0x0100;
+  const uint16 HEATER_STANDBY = 0x0200;
+  const uint16 JET            = 0x0400;
+  const uint16 FILTER         = 0x1000;  // max. 24 h
+  const uint16 DISINFECTION   = 0x2000;  // max. 8 h
+}
+
+// bit mask of button
+namespace FRAME_BUTTON
+{
+  const uint16 DISINFECTION = 0x0001;
+  const uint16 BUBBLE       = 0x0002;
+  const uint16 JET          = 0x0008;
+  const uint16 FILTER       = 0x0080;
+  const uint16 TEMP_DOWN    = 0x0200;
+  const uint16 POWER        = 0x0400;
+  const uint16 TEMP_UP      = 0x1000;
+  const uint16 TEMP_UNIT    = 0x2000;
+  const uint16 HEATER       = 0x8000;
+}
+
+#endif
 
 namespace FRAME_DIGIT
 {
@@ -82,25 +131,18 @@ namespace FRAME_DIGIT
   const uint16 LET_N = SEGMENT_A | SEGMENT_B | SEGMENT_C | SEGMENT_E | SEGMENT_F;
 }
 
-// bit mask of button
-namespace FRAME_BUTTON
-{
-  const uint16 POWER     = 0x0400;
-  const uint16 FILTER    = 0x0002;
-  const uint16 HEATER    = 0x8000;
-  const uint16 BUBBLE    = 0x0008;
-  const uint16 TEMP_UP   = 0x1000;
-  const uint16 TEMP_DOWN = 0x0080;
-  const uint16 TEMP_UNIT = 0x2000;
-}
-
 // frame type markers
 namespace FRAME_TYPE
 {
   const uint16 CUE    = 0x0100;
   const uint16 LED    = 0x4000;
   const uint16 DIGIT  = FRAME_DIGIT::POS_1 | FRAME_DIGIT::POS_2 | FRAME_DIGIT::POS_3 | FRAME_DIGIT::POS_4;
+
+#if defined MODEL_SB_H20
   const uint16 BUTTON = CUE | FRAME_BUTTON::POWER | FRAME_BUTTON::FILTER | FRAME_BUTTON::HEATER | FRAME_BUTTON::BUBBLE | FRAME_BUTTON::TEMP_UP | FRAME_BUTTON::TEMP_DOWN | FRAME_BUTTON::TEMP_UNIT;
+#elif defined MODEL_SJB_HS
+  const uint16 BUTTON = CUE | FRAME_BUTTON::POWER | FRAME_BUTTON::FILTER | FRAME_BUTTON::HEATER | FRAME_BUTTON::BUBBLE | FRAME_BUTTON::TEMP_UP | FRAME_BUTTON::TEMP_DOWN | FRAME_BUTTON::TEMP_UNIT | FRAME_BUTTON::DISINFECTION | FRAME_BUTTON::JET;
+#endif
 }
 
 namespace DIGIT
@@ -114,33 +156,16 @@ namespace DIGIT
   const uint8 POS_1_2_3 = POS_1 | POS_2 | POS_3;
   const uint8 POS_ALL   = POS_1 | POS_2 | POS_3 | POS_4;
 
-  // nibble value used to map a subset of non-numeric states of the 7-segment display
-  const uint8 LET_C = 0xC;
-  const uint8 LET_D = 0xD;
-  const uint8 LET_E = 0xE;
-  const uint8 LET_F = 0xF;
-
-  const uint8 LET_N = 0xA;
-  const uint8 OFF   = 0xB;
+  // ASCII values used to map non-numeric states of the 7-segment display
+  const char OFF = ' ';
 };
 
 namespace ERROR
 {
-  // internal binary value of error display (3 letters)
-  const uint16 NONE             = 0;
-  const uint16 NO_WATER_FLOW    = (DIGIT::LET_E << 8) | (9 << 4) | 0;
-  const uint16 WATER_TEMP_LOW   = (DIGIT::LET_E << 8) | (9 << 4) | 4;
-  const uint16 WATER_TEMP_HIGH  = (DIGIT::LET_E << 8) | (9 << 4) | 5;
-  const uint16 SYSTEM           = (DIGIT::LET_E << 8) | (9 << 4) | 6;
-  const uint16 DRY_FIRE_PROTECT = (DIGIT::LET_E << 8) | (9 << 4) | 7;
-  const uint16 TEMP_SENSOR      = (DIGIT::LET_E << 8) | (9 << 4) | 9;
-  const uint16 HEATING_ABORTED  = (DIGIT::LET_E << 8) | (DIGIT::LET_N << 4) | DIGIT::LET_D;
-
-  const uint16 VALUES[] = { NO_WATER_FLOW, WATER_TEMP_LOW, WATER_TEMP_HIGH, WATER_TEMP_HIGH, SYSTEM, DRY_FIRE_PROTECT, TEMP_SENSOR, HEATING_ABORTED };
-  const unsigned int COUNT = sizeof(VALUES)/sizeof(uint16);
-
   // human readable error on display
   const char CODE_90[]    PROGMEM = "E90";
+  const char CODE_91[]    PROGMEM = "E91";
+  const char CODE_92[]    PROGMEM = "E92";
   const char CODE_94[]    PROGMEM = "E94";
   const char CODE_95[]    PROGMEM = "E95";
   const char CODE_96[]    PROGMEM = "E96";
@@ -149,8 +174,12 @@ namespace ERROR
   const char CODE_END[]   PROGMEM = "END";
   const char CODE_OTHER[] PROGMEM = "EXX";
 
+  const unsigned int COUNT = 9;
+
   // English error messages
   const char EN_90[]    PROGMEM = "no water flow";
+  const char EN_91[]    PROGMEM = "salt level too low";
+  const char EN_92[]    PROGMEM = "salt level too high";
   const char EN_94[]    PROGMEM = "water temp too low";
   const char EN_95[]    PROGMEM = "water temp too high";
   const char EN_96[]    PROGMEM = "system error";
@@ -161,6 +190,8 @@ namespace ERROR
 
   // German error messages
   const char DE_90[]    PROGMEM = "kein Wasserdurchfluss";
+  const char DE_91[]    PROGMEM = "niedriges Salzniveau";
+  const char DE_92[]    PROGMEM = "hohes Salzniveau";
   const char DE_94[]    PROGMEM = "Wassertemperatur zu niedrig";
   const char DE_95[]    PROGMEM = "Wassertemperatur zu hoch";
   const char DE_96[]    PROGMEM = "Systemfehler";
@@ -170,29 +201,30 @@ namespace ERROR
   const char DE_OTHER[] PROGMEM = "Störung";
 
   const char* const TEXT[3][COUNT+1] PROGMEM = {
-                                                 { CODE_90, CODE_94, CODE_95, CODE_96, CODE_97, CODE_99, CODE_END, CODE_OTHER },
-                                                 { EN_90,   EN_94,   EN_95,   EN_96,   EN_97,   EN_99,   EN_END,   EN_OTHER },
-                                                 { DE_90,   DE_94,   DE_95,   DE_96,   DE_97,   DE_99,   DE_END,   DE_OTHER }
+                                                 { CODE_90, CODE_91, CODE_92, CODE_94, CODE_95, CODE_96, CODE_97, CODE_99, CODE_END, CODE_OTHER },
+                                                 { EN_90,   EN_91,   EN_92,   EN_94,   EN_95,   EN_96,   EN_97,   EN_99,   EN_END,   EN_OTHER },
+                                                 { DE_90,   DE_91,   DE_92,   DE_94,   DE_95,   DE_96,   DE_97,   DE_99,   DE_END,   DE_OTHER }
                                                };
 }
 
 // special display values
-inline uint8 display2Byte(uint16 v)    { return v & 0x000F; }
-inline uint16 display2Num(uint16 v)   { return (((v >> 12) & 0x000F)*100) + (((v >> 8) & 0x000F)*10) + ((v >> 4) & 0x000F); }
-inline uint16 display2Error(uint16 v) { return (v >> 4) & 0x0FFF; }
-inline bool displayIsTemp(uint16 v)   { return display2Byte(v) == DIGIT::LET_C || display2Byte(v) == DIGIT::LET_F; }
-inline bool displayIsError(uint16 v)  { return (v & 0xF000) == 0xE000; }
-inline bool displayIsBlank(uint16 v)  { return (v & 0xFFF0) == ((DIGIT::OFF << 12) + (DIGIT::OFF << 8) + (DIGIT::OFF <<4)); }
+inline char display2LastDigit(uint32 v) { return (v >> 24) & 0xFFU; }
+inline uint16 display2Num(uint32 v)     { return (((v & 0xFFU) - '0')*100) + ((((v >> 8) & 0xFFU) - '0')*10) + (((v >> 16) & 0xFFU) - '0'); }
+inline uint32 display2Error(uint32 v)   { return v & 0x00FFFFFFU; }
+inline bool displayIsTemp(uint32 v)     { return display2LastDigit(v) == 'C' || display2LastDigit(v) == 'F'; }
+inline bool displayIsTime(uint32 v)     { return display2LastDigit(v) == 'H'; }
+inline bool displayIsError(uint32 v)    { return (v & 0xFFU) == 'E'; }
+inline bool displayIsBlank(uint32 v)    { return (v & 0x00FFFFFFU) == (' ' << 16) + (' ' << 8) + ' '; }
 
-volatile SBH20IO::State SBH20IO::state;
-volatile SBH20IO::IsrState SBH20IO::isrState;
-volatile SBH20IO::Buttons SBH20IO::buttons;
+volatile PureSpaIO::State PureSpaIO::state;
+volatile PureSpaIO::IsrState PureSpaIO::isrState;
+volatile PureSpaIO::Buttons PureSpaIO::buttons;
 
 
 // @TODO detect when latch signal stays low
 // @TODO detect act temp change during error
 // @TODO improve reliability of water temp change (counter auto repeat and too short press)
-void SBH20IO::setup(LANG language)
+void PureSpaIO::setup(LANG language)
 {
   this->language = language;
 
@@ -200,10 +232,20 @@ void SBH20IO::setup(LANG language)
   pinMode(PIN::DATA,  INPUT);
   pinMode(PIN::LATCH, INPUT);
 
-  attachInterruptArg(digitalPinToInterrupt(PIN::CLOCK), SBH20IO::clockRisingISR, this, RISING);
+  attachInterruptArg(digitalPinToInterrupt(PIN::CLOCK), PureSpaIO::clockRisingISR, this, RISING);
 }
 
-void SBH20IO::loop()
+PureSpaIO::MODEL PureSpaIO::getModel() const
+{
+  return model;
+}
+
+const char* PureSpaIO::getModelName() const
+{
+  return MODEL_NAME;
+}
+
+void PureSpaIO::loop()
 {
   // device online check
   unsigned long now = millis();
@@ -219,95 +261,141 @@ void SBH20IO::loop()
   }
 }
 
-bool SBH20IO::isOnline() const
+bool PureSpaIO::isOnline() const
 {
   return state.online;
 }
 
-unsigned int SBH20IO::getTotalFrames() const
+unsigned int PureSpaIO::getTotalFrames() const
 {
   return state.frameCounter;
 }
 
-unsigned int SBH20IO::getDroppedFrames() const
+unsigned int PureSpaIO::getDroppedFrames() const
 {
   return state.frameDropped;
 }
 
-int SBH20IO::getActWaterTempCelsius() const
+/**
+ * @return actual water temperatur [°C] 0..60 or UNDEF::INT if unknown
+ */
+int PureSpaIO::getActWaterTempCelsius() const
 {
-  return (state.waterTemp != UNDEF::USHORT) ? convertDisplayToCelsius(state.waterTemp) : UNDEF::USHORT;
+  return (state.waterTemp != UNDEF::UINT) ? convertDisplayToCelsius(state.waterTemp) : UNDEF::INT;
 }
 
-int SBH20IO::getDesiredWaterTempCelsius() const
+/**
+ * @return desired water temperatur [°C] or UNDEF::INT if unknown
+ *
+ * note: value is undefined after power up until value is changed
+ */
+int PureSpaIO::getDesiredWaterTempCelsius() const
 {
-  return (state.desiredTemp != UNDEF::USHORT) ? convertDisplayToCelsius(state.desiredTemp) : UNDEF::USHORT;
+  return (state.desiredTemp != UNDEF::UINT) ? convertDisplayToCelsius(state.desiredTemp) : UNDEF::INT;
 }
 
-unsigned int SBH20IO::getErrorValue() const
+/**
+ * @return disinfection duration [h] 0/3/5/8 h or UNDEF::INT if unknown
+ *
+ * note: value is undefined after power up until disinfection is activated
+ */
+int PureSpaIO::getDisinfectionTime() const
 {
-  return state.error;
+  return isDisinfectionOn() ? (state.disinfectionTime != UNDEF::UINT ? display2Num(state.disinfectionTime) : UNDEF::INT) : 0;
 }
 
-String SBH20IO::getErrorMessage(unsigned int errorValue) const
+String PureSpaIO::getErrorCode() const
 {
-  if (errorValue)
+  memcpy((void*)errorBuffer, (void*)&state.error, 4);
+  return errorBuffer;
+}
+
+String PureSpaIO::getErrorMessage(const String& errorCode) const
+{
+  if (errorCode.length())
   {
-    // get error text index of error value
-    unsigned int i;
-    for (i=0; i<ERROR::COUNT; i++)
+    // get error index
+    unsigned int errorIndex = UINT_MAX;
+    for (unsigned int i=0; i<ERROR::COUNT; i++)
     {
-      if (ERROR::VALUES[i] == errorValue)
+      String ec = FPSTR(ERROR::TEXT[(unsigned int)LANG::CODE][i]);
+      if (errorCode == ec)
       {
+        errorIndex = i;
         break;
       }
     }
 
-    // load error text from PROGMEM
-    return FPSTR(ERROR::TEXT[(unsigned int)language][i]);
+    // get error translation
+    if (errorIndex != UINT_MAX)
+    {
+      return FPSTR(ERROR::TEXT[(unsigned int)language][errorIndex]);
+    }
+    else
+    {
+      // undefined error
+      return errorCode;
+    }
   }
   else
   {
     // no error
-    return "";
+    return errorCode;
   }
 }
 
-unsigned int SBH20IO::getRawLedValue() const
+unsigned int PureSpaIO::getRawLedValue() const
 {
   return (state.ledStatus != UNDEF::USHORT) ? state.ledStatus : UNDEF::USHORT;
 }
 
-uint8 SBH20IO::isPowerOn() const
+uint8 PureSpaIO::isPowerOn() const
 {
   return (state.ledStatus != UNDEF::USHORT) ? ((state.ledStatus & FRAME_LED::POWER) != 0) : UNDEF::BOOL;
 }
 
-uint8 SBH20IO::isFilterOn() const
+uint8 PureSpaIO::isFilterOn() const
 {
   return (state.ledStatus != UNDEF::USHORT) ? ((state.ledStatus & FRAME_LED::FILTER) != 0) : UNDEF::BOOL;
 }
 
-uint8 SBH20IO::isBubbleOn() const
+uint8 PureSpaIO::isBubbleOn() const
 {
   return (state.ledStatus != UNDEF::USHORT) ? ((state.ledStatus & FRAME_LED::BUBBLE) != 0) : UNDEF::BOOL;
 }
 
-uint8 SBH20IO::isHeaterOn() const
+uint8 PureSpaIO::isHeaterOn() const
 {
   return (state.ledStatus != UNDEF::USHORT) ? ((state.ledStatus & (FRAME_LED::HEATER_ON | FRAME_LED::HEATER_STANDBY)) != 0) : UNDEF::BOOL;
 }
 
-uint8 SBH20IO::isHeaterStandby() const
+uint8 PureSpaIO::isHeaterStandby() const
 {
   return (state.ledStatus != UNDEF::USHORT) ? ((state.ledStatus & FRAME_LED::HEATER_STANDBY) != 0) : UNDEF::BOOL;
 }
 
-uint8 SBH20IO::isBuzzerOn() const
+uint8 PureSpaIO::isBuzzerOn() const
 {
   return (state.ledStatus != UNDEF::USHORT) ? ((state.ledStatus & FRAME_LED::NO_BEEP) == 0) : UNDEF::BOOL;
 }
 
+uint8 PureSpaIO::isDisinfectionOn() const
+{
+#ifdef MODEL_SJB_HS
+  return (state.ledStatus != UNDEF::USHORT) ? ((state.ledStatus & FRAME_LED::DISINFECTION) != 0) : UNDEF::BOOL;
+#else
+  return false;
+#endif
+}
+
+uint8 PureSpaIO::isJetOn() const
+{
+#ifdef MODEL_SJB_HS
+  return (state.ledStatus != UNDEF::USHORT) ? ((state.ledStatus & FRAME_LED::JET) != 0) : UNDEF::BOOL;
+#else
+  return false;
+#endif
+}
 
 /**
  * set desired water temperature by performing button up or down actions
@@ -321,17 +409,19 @@ uint8 SBH20IO::isBuzzerOn() const
  *
  * @param temp water temperature setpoint [°C]
  */
-void SBH20IO::setDesiredWaterTempCelsius(int temp)
+void PureSpaIO::setDesiredWaterTempCelsius(int temp)
 {
   if (temp >= WATER_TEMP::SET_MIN && temp <= WATER_TEMP::SET_MAX)
   {
-    if (isPowerOn() == true && state.error == ERROR::NONE)
+    if (isPowerOn() && state.error == ERROR_NONE)
     {
+#ifdef FORCE_WIFI_SLEEP
       // try to get initial temp
       WiFi.forceSleepBegin();
       int setTemp = getDesiredWaterTempCelsius();
+      //DEBUG_MSG("\nBset %d", setTemp);
       bool modifying = false;
-      if (setTemp == UNDEF::USHORT)
+      if (setTemp == UNDEF::INT)
       {
         // trigger temp modification
         changeWaterTemp(-1);
@@ -345,15 +435,15 @@ void SBH20IO::setDesiredWaterTempCelsius(int temp)
           delay(sleep);
           setTemp = getDesiredWaterTempCelsius();
           tries--;
-        } while (setTemp == UNDEF::USHORT && tries);
+        } while (setTemp == UNDEF::INT && tries);
 
         // check success
-        if (setTemp == UNDEF::USHORT)
+        if (setTemp == UNDEF::INT)
         {
           // error, abort
-          DEBUG_MSG("\naborted\n");
           WiFi.forceSleepWake();
           delay(1);
+          DEBUG_MSG("\naborted\n");
           return;
         }
       }
@@ -386,9 +476,131 @@ void SBH20IO::setDesiredWaterTempCelsius(int temp)
         }
         modifying = true;
       }
+
       WiFi.forceSleepWake();
       delay(1);
+#else
+      // trigger temp modification
+      if (!changeWaterTemp(-1))
+      {
+        changeWaterTemp(+1);
+      }
+
+      int sleep = 5*CYCLE::PERIOD; // ms
+      int changeTries = 3;
+      int setTemp = UNDEF::INT;
+      bool getActualSetpoint = true;
+      do
+      {
+        // get actual temperature setpoint (will take 2-3 blink durations, especially inital) but skip when change has failed
+        int readTries = 4*BLINK::PERIOD/sleep;
+        int newSetTemp = getActualSetpoint? UNDEF::INT : setTemp;
+        ESP.wdtFeed();
+        if (getActualSetpoint)
+        {
+          // always wait after change, especially to catch double trigger
+          waitBuzzerOff();
+          delay(BLINK::PERIOD);
+        }
+        while (getActualSetpoint)
+        {
+          newSetTemp = getDesiredWaterTempCelsius();
+          readTries--;
+          getActualSetpoint = newSetTemp == setTemp && readTries;
+          if (getActualSetpoint)
+          {
+            // only wait when not done
+            delay(sleep);
+          }
+        }
+        DEBUG_MSG("\nst:%d (rt:%d)", newSetTemp, readTries);
+
+        // check success
+        if (newSetTemp == UNDEF::INT)
+        {
+          // error, abort
+          DEBUG_MSG("\naborted\n");
+          return;
+        }
+        else
+        {
+          // update change tries based on inital delta
+          if (setTemp == UNDEF::INT)
+          {
+            changeTries += abs(newSetTemp - temp);
+            changeTries += changeTries/10;
+          }
+
+          // change temperature by 1 degree
+          setTemp = newSetTemp;
+          if (temp > setTemp)
+          {
+            getActualSetpoint = changeWaterTemp(+1);
+            changeTries--;
+          }
+          else if (temp < setTemp)
+          {
+            getActualSetpoint = changeWaterTemp(-1);
+            changeTries--;
+          }
+        }
+      } while (temp != setTemp && changeTries);
+      DEBUG_MSG("\ncT:%d", changeTries);
+#endif
     }
+  }
+}
+
+/**
+ * set desired disinfection duration by performing button actions
+ * repeatedly until the requested duration is displayed
+ *
+ * notes:
+ * - method will block until setting is completed
+ * - WiFi is temporarily put to sleep to improve receive decoding reliability
+ *
+ * @param hours disinfection duration 0/3/5/8 h
+ */
+void PureSpaIO::setDisinfectionTime(int hours)
+{
+  // use nearest available value
+  if (hours > 5)      hours = 8;
+  else if (hours > 3) hours = 5;
+  else if (hours > 0) hours = 3;
+  else                hours = 0;
+
+  if (isPowerOn() && state.error == ERROR_NONE)
+  {
+#ifdef FORCE_WIFI_SLEEP
+    WiFi.forceSleepBegin();
+#endif
+
+    int tries = 8;
+    do
+    {
+      // get actual disinfection time
+      int actHours = getDisinfectionTime();
+      if (actHours == UNDEF::INT)
+      {
+        // error reading actual time, abort
+        DEBUG_MSG("\naborted\n");
+        break;
+      }
+      else if (actHours == hours)
+      {
+        // set and act time matches, done
+        break;
+      }
+
+      // toggle disinfection time
+      pressButton(buttons.toggleDisinfection);
+      tries--;
+    } while (tries);
+
+#ifdef FORCE_WIFI_SLEEP
+    WiFi.forceSleepWake();
+    delay(1);
+#endif
   }
 }
 
@@ -401,26 +613,24 @@ void SBH20IO::setDesiredWaterTempCelsius(int temp)
  * @param buttonPressCount
  * @return true if beep was received, false if no beep was received until timeout
  */
-bool SBH20IO::pressButton(volatile unsigned int& buttonPressCount)
+bool PureSpaIO::pressButton(volatile unsigned int& buttonPressCount)
 {
-  WiFi.setSleepMode(WIFI_LIGHT_SLEEP);
-  //WiFi.forceSleepBegin();
   waitBuzzerOff();
   unsigned int tries = BUTTON::ACK_TIMEOUT/BUTTON::ACK_CHECK_PERIOD;
+  WiFi.setSleepMode(WIFI_LIGHT_SLEEP);
   buttonPressCount = BUTTON::PRESS_COUNT;
   while (buttonPressCount && tries)
   {
     delay(BUTTON::ACK_CHECK_PERIOD);
     tries--;
   }
+  bool success = state.buzzer;
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
-  //WiFi.forceSleepWake();
-  //delay(1);
 
-  return tries;
+  return success;
 }
 
-void SBH20IO::setBubbleOn(bool on)
+void PureSpaIO::setBubbleOn(bool on)
 {
   if (on ^ (isBubbleOn() == true))
   {
@@ -428,7 +638,7 @@ void SBH20IO::setBubbleOn(bool on)
   }
 }
 
-void SBH20IO::setFilterOn(bool on)
+void PureSpaIO::setFilterOn(bool on)
 {
   if (on ^ (isFilterOn() == true))
   {
@@ -436,7 +646,7 @@ void SBH20IO::setFilterOn(bool on)
   }
 }
 
-void SBH20IO::setHeaterOn(bool on)
+void PureSpaIO::setHeaterOn(bool on)
 {
   if (on ^ (isHeaterOn() == true || isHeaterStandby() == true))
   {
@@ -444,7 +654,15 @@ void SBH20IO::setHeaterOn(bool on)
   }
 }
 
-void SBH20IO::setPowerOn(bool on)
+void PureSpaIO::setJetOn(bool on)
+{
+  if (on ^ (isJetOn() == true))
+  {
+    pressButton(buttons.toggleJet);
+  }
+}
+
+void PureSpaIO::setPowerOn(bool on)
 {
   bool active = isPowerOn() == true;
   if (on ^ active)
@@ -459,7 +677,7 @@ void SBH20IO::setPowerOn(bool on)
  *
  * @return true if buzzer is off, false if buzzer is still on after timeout
  */
-bool SBH20IO::waitBuzzerOff() const
+bool PureSpaIO::waitBuzzerOff() const
 {
   int tries = BUTTON::ACK_TIMEOUT/BUTTON::ACK_CHECK_PERIOD;
   while (state.buzzer && tries)
@@ -484,78 +702,96 @@ bool SBH20IO::waitBuzzerOff() const
 /**
  * change water temperature setpoint by 1 degree and wait for confirmation (blocking)
  *
+ * notes:
+ * - WiFi is temporarily put to sleep to improve receive decoding reliability
+ *
  * @param up press up (> 0) or down (< 0) button
  * @return true if beep was received, false if no beep was received until timeout
  */
-bool SBH20IO::changeWaterTemp(int up)
+bool PureSpaIO::changeWaterTemp(int up)
 {
-  if (isPowerOn() == true && state.error == ERROR::NONE)
+  bool success = false;
+
+  if (isPowerOn() && state.error == ERROR_NONE)
   {
-    // perform button action
-    waitBuzzerOff();
     //DEBUG_MSG("\nP ");
-    int tries = BUTTON::ACK_TIMEOUT/BUTTON::ACK_CHECK_PERIOD;
+    waitBuzzerOff();
+
+#ifndef FORCE_WIFI_SLEEP
+    WiFi.setSleepMode(WIFI_LIGHT_SLEEP);
+#endif
+
+    // perform button action
+    int tries = BUTTON::PRESS_SHORT_COUNT*CYCLE::PERIOD/BUTTON::ACK_CHECK_PERIOD;
     if (up > 0)
     {
-      buttons.toggleTempUp = BUTTON::PRESS_COUNT;
+      buttons.toggleTempUp = BUTTON::PRESS_SHORT_COUNT;
       while (buttons.toggleTempUp && tries)
       {
         delay(BUTTON::ACK_CHECK_PERIOD);
         tries--;
       }
+      buttons.toggleTempUp = 0;
     }
     else if (up < 0)
     {
-      buttons.toggleTempDown = BUTTON::PRESS_COUNT;
+      buttons.toggleTempDown = BUTTON::PRESS_SHORT_COUNT;
       while (buttons.toggleTempDown && tries)
       {
         delay(BUTTON::ACK_CHECK_PERIOD);
         tries--;
       }
+      buttons.toggleTempDown = 0;
     }
 
-    if (tries && state.buzzer)
+    // wait for buzzer on
+    tries = (BUTTON::PRESS_COUNT - BUTTON::PRESS_SHORT_COUNT)*CYCLE::PERIOD/BUTTON::ACK_CHECK_PERIOD;
+    while (!state.buzzer && tries)
     {
-      return true;
+      delay(BUTTON::ACK_CHECK_PERIOD);
+      tries--;
     }
-    else
+
+    success = state.buzzer;
+
+#ifndef FORCE_WIFI_SLEEP
+    WiFi.setSleepMode(WIFI_NONE_SLEEP);
+#endif
+
+    if (!success)
     {
       DEBUG_MSG("\ncWT fail");
-      return false;
     }
   }
+
+  return success;
 }
 
-uint16 SBH20IO::convertDisplayToCelsius(uint16 value) const
+int PureSpaIO::convertDisplayToCelsius(uint32 value) const
 {
-  uint16 celsiusValue = display2Num(value);
-  uint16 tempUint = display2Byte(value);
-  if (tempUint == DIGIT::LET_F)
+  int celsiusValue = display2Num(value);
+  char tempUnit = display2LastDigit(value);
+  //DEBUG_MSG("\nDtC 0x%x =  %d%c", value, celsiusValue, tempUnit);
+  if (tempUnit == 'F')
   {
     // convert °F to °C
     float fValue = (float)celsiusValue;
-    celsiusValue = (uint16)round(((fValue - 32) * 5) / 9);
+    celsiusValue = (int)round(((fValue - 32) * 5) / 9);
   }
-  else if (tempUint != DIGIT::LET_C)
+  else if (tempUnit != 'C')
   {
-    celsiusValue = UNDEF::USHORT;
+    celsiusValue = UNDEF::INT;
   }
 
-  return (celsiusValue >= 0) && (celsiusValue <= 60) ? celsiusValue : UNDEF::USHORT;
+  return (celsiusValue >= 0) && (celsiusValue <= 60) ? celsiusValue : UNDEF::INT;
 }
 
-ICACHE_RAM_ATTR void SBH20IO::clockRisingISR(void* arg)
+IRAM_ATTR void PureSpaIO::clockRisingISR(void* arg)
 {
   bool data = !digitalRead(PIN::DATA);
-  bool enable = digitalRead(PIN::LATCH) == LOW;
+  bool enabled = !digitalRead(PIN::LATCH);
 
-/*
-  SBH20IO* sbh20io = (SBH20IO*)arg;
-  volatile State& state = sbh20io->state;
-  volatile IsrState& isrState = sbh20io->isrState;
-*/
-
-  if (enable || isrState.receivedBits == (FRAME::BITS - 1))
+  if (enabled || isrState.receivedBits == (FRAME::BITS - 1))
   {
     isrState.frameValue = (isrState.frameValue << 1) + data;
     isrState.receivedBits++;
@@ -603,58 +839,61 @@ ICACHE_RAM_ATTR void SBH20IO::clockRisingISR(void* arg)
   }
 }
 
-ICACHE_RAM_ATTR inline void SBH20IO::decodeDisplay()
+IRAM_ATTR inline void PureSpaIO::decodeDisplay()
 {
-  uint8 digit;
+  char digit;
   switch (isrState.frameValue & FRAME_DIGIT::SEGMENTS)
   {
     case FRAME_DIGIT::OFF:
       digit = DIGIT::OFF;
       break;
     case FRAME_DIGIT::NUM_0:
-      digit = 0x0;
+      digit = '0';
       break;
     case FRAME_DIGIT::NUM_1:
-      digit = 0x1;
+      digit = '1';
       break;
     case FRAME_DIGIT::NUM_2:
-      digit = 0x2;
+      digit = '2';
       break;
     case FRAME_DIGIT::NUM_3:
-      digit = 0x3;
+      digit = '3';
       break;
     case FRAME_DIGIT::NUM_4:
-      digit = 0x4;
+      digit = '4';
       break;
     case FRAME_DIGIT::NUM_5:
-      digit = 0x5;
+      digit = '5';
       break;
     case FRAME_DIGIT::NUM_6:
-      digit = 0x6;
+      digit = '6';
       break;
     case FRAME_DIGIT::NUM_7:
-      digit = 0x7;
+      digit = '7';
       break;
     case FRAME_DIGIT::NUM_8:
-      digit = 0x8;
+      digit = '8';
       break;
     case FRAME_DIGIT::NUM_9:
-      digit = 0x9;
+      digit = '9';
       break;
     case FRAME_DIGIT::LET_C:
-      digit = DIGIT::LET_C; // for °C
+      digit = 'C'; // temp unit °C
       break;
     case FRAME_DIGIT::LET_D:
-      digit = DIGIT::LET_D; // for error code "END"
+      digit = 'D';
       break;
     case FRAME_DIGIT::LET_E:
-      digit = DIGIT::LET_E; // for error code
+      digit = 'E';
       break;
     case FRAME_DIGIT::LET_F:
-      digit = DIGIT::LET_F; // for °F
+      digit = 'F'; // temp unit °F
+      break;
+    case FRAME_DIGIT::LET_H:
+      digit = 'H';
       break;
     case FRAME_DIGIT::LET_N:
-      digit = DIGIT::LET_N; // for error code "END"
+      digit = 'N';
       break;
 
     default:
@@ -666,7 +905,7 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeDisplay()
   {
     case FRAME_DIGIT::POS_1:
       //DEBUG_MSG("1");
-      isrState.displayValue = (isrState.displayValue & 0x0FFF) + (digit << 12);
+      isrState.displayValue = (isrState.displayValue & 0xFFFFFF00U) + digit;
       isrState.receivedDigits = DIGIT::POS_1;
       break;
 
@@ -674,7 +913,7 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeDisplay()
       //DEBUG_MSG("2");
       if (isrState.receivedDigits == DIGIT::POS_1)
       {
-        isrState.displayValue = (isrState.displayValue & 0xF0FF) + (digit << 8);
+        isrState.displayValue = (isrState.displayValue & 0xFFFF00FFU) + (digit << 8);
         isrState.receivedDigits |= DIGIT::POS_2;
       }
       break;
@@ -683,7 +922,7 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeDisplay()
       //DEBUG_MSG("3");
       if (isrState.receivedDigits == DIGIT::POS_1_2)
       {
-        isrState.displayValue = (isrState.displayValue & 0xFF0F) + (digit << 4);
+        isrState.displayValue = (isrState.displayValue & 0xFF00FFFFU) + (digit << 16);
         isrState.receivedDigits |= DIGIT::POS_3;
       }
       break;
@@ -692,7 +931,7 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeDisplay()
       //DEBUG_MSG("4");
       if (isrState.receivedDigits == DIGIT::POS_1_2_3)
       {
-        isrState.displayValue = (isrState.displayValue & 0xFFF0) + digit;
+        isrState.displayValue = (isrState.displayValue & 0x00FFFFFFU) + (digit << 24);
         isrState.receivedDigits = DIGIT::POS_ALL;
       }
       break;
@@ -707,17 +946,17 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeDisplay()
       isrState.stableDisplayValueCount--;
       if (isrState.stableDisplayValueCount == 0)
       {
-        //DEBUG_MSG("S%x ", isrState.displayValue);
-        isrState.stableDisplayValueCount = CONFIRM_FRAMES::DISP;
-        //DEBUG_MSG("O");
+        //DEBUG_MSG(" C"); // confirmed
+        isrState.stableDisplayValueCount = CONFIRM_FRAMES::REGULAR;
         if (isrState.isDisplayBlinking)
         {
+          //DEBUG_MSG("B");
           if (diff(state.frameCounter, isrState.lastBlankDisplayFrameCounter) > BLINK::STOPPED_FRAMES)
           {
             // blinking is over, clear desired temp
             //DEBUG_MSG("b");
             isrState.isDisplayBlinking = false;
-            isrState.latestBlinkingTemp = UNDEF::USHORT;
+            isrState.latestBlinkingTemp = UNDEF::UINT;
           }
         }
 
@@ -725,76 +964,101 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeDisplay()
         {
           // display does not show an error
           //DEBUG_MSG("e");
-          if (displayIsTemp(isrState.displayValue))
+#ifdef MODEL_SJB_HS
+          if (displayIsTime(isrState.displayValue))
           {
-            // display shows a temperature
-            //DEBUG_MSG("T");
-            if (isrState.isDisplayBlinking)
+            // display shows a time
+            //DEBUG_MSG("C");
+            if (isrState.displayValue == isrState.latestDisinfectionTime)
             {
-              // display is blinking
-              if (isrState.displayValue == isrState.latestBlinkingTemp)
+              // new time is stable
+              //DEBUG_MSG("C%d", stableWaterTempCount);
+              isrState.stableDisinfectionTimeCount--;
+              if (isrState.stableDisinfectionTimeCount == 0)
               {
-                // blinking temp is stable
-                isrState.stableBlinkingWaterTempCount++;
-                //DEBUG_MSG(" DS%d ", isrState.stableDesiredWaterTempCount);
-              }
-              else if (diff(state.frameCounter, isrState.lastBlankDisplayFrameCounter) < BLINK::TEMP_FRAMES)
-              {
-                // blinking temp has changed (is read after a blank screen and set at next black screen)
-                //DEBUG_MSG(" DC%x ", isrState.displayValue);
-                isrState.latestBlinkingTemp = isrState.displayValue;
-                isrState.stableBlinkingWaterTempCount = 0;
+                // save time
+                if (state.disinfectionTime != isrState.displayValue)
+                {
+                  //DEBUG_MSG(" AC ");
+                  state.disinfectionTime = isrState.displayValue;
+                }
+
+                isrState.stableDisinfectionTimeCount = CONFIRM_FRAMES::REGULAR;
               }
             }
             else
             {
-              // display is not blinking
-              if (isrState.displayValue == isrState.latestWaterTemp)
+              // time has changed
+              //DEBUG_MSG("c");
+              isrState.latestDisinfectionTime = isrState.displayValue;
+              isrState.stableWaterTempCount = CONFIRM_FRAMES::NOT_BLINKING;
+            }
+          }
+          else
+#endif
+          {
+            if (displayIsTemp(isrState.displayValue))
+            {
+              // display shows a temperature
+              //DEBUG_MSG("T");
+              if (isrState.isDisplayBlinking)
               {
-                // new actual temp is stable
-                //DEBUG_MSG("A%d", stableWaterTempCount);
-                isrState.stableWaterTempCount--;
-                if (isrState.stableWaterTempCount == 0)
+                // display is blinking
+                //DEBUG_MSG("B");
+                if (isrState.displayValue == isrState.latestBlinkingTemp)
                 {
-                  // save actual temp
-                  if (state.waterTemp != isrState.displayValue)
-                  {
-                    //DEBUG_MSG(" AT ");
-                    state.waterTemp = isrState.displayValue;
-                  }
-
-                  // get temp unit
-                  uint16 tempUnit = display2Byte(isrState.displayValue);
-                  if (tempUnit != isrState.latestTempUnit)
-                  {
-                    isrState.latestTempUnit = tempUnit;
-                  }
-
-                  isrState.stableWaterTempCount = CONFIRM_FRAMES::WATER_TEMP_ACT;
-
-                  // clear error
-                  //state.error = ERROR::NONE;
+                  // blinking temp is stable
+                  isrState.stableBlinkingWaterTempCount++;
+                  //DEBUG_MSG("DS ");
+                }
+                else if (diff(state.frameCounter, isrState.lastBlankDisplayFrameCounter) < BLINK::TEMP_FRAMES)
+                {
+                  // blinking temp has changed (is read after a blank screen and set at next black screen)
+                  //DEBUG_MSG("DC ");
+                  isrState.latestBlinkingTemp = isrState.displayValue;
+                  isrState.stableBlinkingWaterTempCount = 0;
                 }
               }
               else
               {
-                // actual temp is changed
-                //DEBUG_MSG("a");
-                isrState.latestWaterTemp = isrState.displayValue;
-                isrState.stableWaterTempCount = CONFIRM_FRAMES::WATER_TEMP_ACT;
+                // display is not blinking
+                //DEBUG_MSG("b");
+                if (isrState.displayValue == isrState.latestWaterTemp)
+                {
+                  // new actual temp is stable
+                  //DEBUG_MSG("A ");
+                  isrState.stableWaterTempCount--;
+                  if (isrState.stableWaterTempCount == 0)
+                  {
+                    // save actual temp
+                    if (state.waterTemp != isrState.displayValue)
+                    {
+                      //DEBUG_MSG(" T");
+                      state.waterTemp = isrState.displayValue;
+                    }
+
+                    isrState.stableWaterTempCount = CONFIRM_FRAMES::NOT_BLINKING;
+                  }
+                }
+                else
+                {
+                  // actual temp is changed
+                  //DEBUG_MSG("a ");
+                  isrState.latestWaterTemp = isrState.displayValue;
+                  isrState.stableWaterTempCount = CONFIRM_FRAMES::NOT_BLINKING;
+                }
               }
             }
-          }
-          else
-          {
-            // unsupported display state (no error, no temperature)
-            //DEBUG_MSG("t");
+            else
+            {
+              // unsupported display state (no error, no temperature)
+              //DEBUG_MSG("t ");
+            }
           }
         }
         else
         {
           // display shows error code
-          //DEBUG_MSG("E");
           state.error = display2Error(isrState.displayValue);
         }
       }
@@ -813,23 +1077,24 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeDisplay()
         if (isrState.isDisplayBlinking)
         {
           // already blinking
-          if (isrState.latestBlinkingTemp != UNDEF::USHORT)
+          if (isrState.latestBlinkingTemp != UNDEF::UINT)
           {
             // new temp
+            //DEBUG_MSG("bc ");
             isrState.blankCounter++;
           }
 
           // if display was already blinking several times, save desired temp
           // otherwise could be start of error
-          if (!state.error && isrState.blankCounter > 2
-              && isrState.stableBlinkingWaterTempCount >= CONFIRM_FRAMES::WATER_TEMP_SET
+          if (state.error == ERROR_NONE && isrState.blankCounter > 2
+              && isrState.stableBlinkingWaterTempCount >= CONFIRM_FRAMES::REGULAR
               && state.desiredTemp != isrState.latestBlinkingTemp)
           {
             //DEBUG_MSG("\nDT%x ", isrState.displayValue);
             state.desiredTemp = isrState.latestBlinkingTemp;
           }
 
-          isrState.latestBlinkingTemp = UNDEF::USHORT;
+          isrState.latestBlinkingTemp = UNDEF::UINT;
           isrState.stableBlinkingWaterTempCount = 0;
         }
         else
@@ -845,14 +1110,14 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeDisplay()
     {
       // display value changed
       isrState.latestDisplayValue = isrState.displayValue;
-      isrState.stableDisplayValueCount = CONFIRM_FRAMES::DISP;
-      isrState.stableDisplayBlankCount = CONFIRM_FRAMES::DISP;
+      isrState.stableDisplayValueCount = CONFIRM_FRAMES::REGULAR;
+      isrState.stableDisplayBlankCount = CONFIRM_FRAMES::REGULAR;
     }
   }
   // else not all digits set yet
 }
 
-ICACHE_RAM_ATTR inline void SBH20IO::decodeLED()
+ICACHE_RAM_ATTR inline void PureSpaIO::decodeLED()
 {
   if (isrState.frameValue == isrState.latestLedStatus)
   {
@@ -864,14 +1129,16 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeLED()
       state.ledStatus = isrState.frameValue;
       state.buzzer = !(state.ledStatus & FRAME_LED::NO_BEEP);
       state.stateUpdated = true;
-      isrState.stableLedStatusCount = CONFIRM_FRAMES::LED;
+      isrState.stableLedStatusCount = CONFIRM_FRAMES::REGULAR;
 
       // clear buttons if buzzer is on
       if (state.buzzer)
       {
         buttons.toggleBubble = 0;
+        buttons.toggleDisinfection = 0;
         buttons.toggleFilter = 0;
         buttons.toggleHeater = 0;
+        buttons.toggleJet = 0;
         buttons.togglePower = 0;
         buttons.toggleTempUp = 0;
         buttons.toggleTempDown = 0;
@@ -882,70 +1149,68 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeLED()
   {
     // LED status changed
     isrState.latestLedStatus = isrState.frameValue;
-    isrState.stableLedStatusCount = CONFIRM_FRAMES::LED;
+    isrState.stableLedStatusCount = CONFIRM_FRAMES::REGULAR;
   }
 }
 
-ICACHE_RAM_ATTR inline void SBH20IO::decodeButton()
+IRAM_ATTR inline void PureSpaIO::updateButtonState(volatile unsigned int& buttonPressCount)
+{
+  if (buttonPressCount)
+  {
+    if (state.buzzer)
+    {
+      buttonPressCount = 0;
+    }
+    else
+    {
+      isrState.reply = true;
+      buttonPressCount--;
+    }
+  }
+}
+
+IRAM_ATTR inline void PureSpaIO::decodeButton()
 {
   if (isrState.frameValue & FRAME_BUTTON::FILTER)
   {
     //DEBUG_MSG("F");
-    if (buttons.toggleFilter)
-    {
-      isrState.reply = true;
-      buttons.toggleFilter--;
-    }
+    updateButtonState(buttons.toggleFilter);
   }
   else if (isrState.frameValue & FRAME_BUTTON::HEATER)
   {
     //DEBUG_MSG("H");
-    if (buttons.toggleHeater)
-    {
-      isrState.reply = true;
-      buttons.toggleHeater--;
-    }
+    updateButtonState(buttons.toggleHeater);
   }
   else if (isrState.frameValue & FRAME_BUTTON::BUBBLE)
   {
     //DEBUG_MSG("B");
-    if (buttons.toggleBubble)
-    {
-      isrState.reply = true;
-      buttons.toggleBubble--;
-      if (!buttons.toggleBubble)
-      {
-        DEBUG_MSG("\nFBO");
-      }
-    }
+    updateButtonState(buttons.toggleBubble);
   }
   else if (isrState.frameValue & FRAME_BUTTON::POWER)
   {
     //DEBUG_MSG(" P");
-    if (buttons.togglePower)
-    {
-      isrState.reply = true;
-      buttons.togglePower--;
-    }
+    updateButtonState(buttons.togglePower);
   }
   else if (isrState.frameValue & FRAME_BUTTON::TEMP_UP)
   {
     //DEBUG_MSG("U");
-    if (buttons.toggleTempUp)
-    {
-      isrState.reply = true;
-      buttons.toggleTempUp--;
-    }
+    updateButtonState(buttons.toggleTempUp);
   }
   else if (isrState.frameValue & FRAME_BUTTON::TEMP_DOWN)
   {
     //DEBUG_MSG("D");
-    if (buttons.toggleTempDown)
-    {
-      isrState.reply = true;
-      buttons.toggleTempDown--;
-    }
+    updateButtonState(buttons.toggleTempDown);
   }
+#ifdef MODEL_SJB_HS
+  else if (isrState.frameValue & FRAME_BUTTON::DISINFECTION)
+  {
+    updateButtonState(buttons.toggleDisinfection);
+  }
+  else if (isrState.frameValue & FRAME_BUTTON::JET)
+  {
+    updateButtonState(buttons.toggleJet);
+  }
+#endif
   else if (isrState.frameValue & FRAME_BUTTON::TEMP_UNIT)
   {
     //DEBUG_MSG("T");
@@ -958,14 +1223,14 @@ ICACHE_RAM_ATTR inline void SBH20IO::decodeButton()
   if (isrState.reply)
   {
     // delay around 5 µs relative to rising edge of latch signal before pulsing
-    // pulse should be around 2 µs and must be completed before next falling edge of clock
+    // pulse should be around 2 µs and MUST be completed BEFORE next falling edge of clock
 #if F_CPU == 160000000L
     delayMicroseconds(1);
     pinMode(PIN::DATA, OUTPUT);
     delayMicroseconds(3);
     pinMode(PIN::DATA, INPUT);
 #else
-    //#error "160 MHz CPU frequency required! Pulse timing not possible at 80 MHz, because the code above takes too long to reach this point."
+    #error 160 MHz CPU frequency required! Pulse timing not possible at 80 MHz, because the code above takes too long to reach this point.
     // at least using Arduino methods
 #endif
     isrState.reply = false;

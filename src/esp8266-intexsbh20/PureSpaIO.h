@@ -1,7 +1,7 @@
 /*
- * project:  Intex PureSpa SB-H20 WiFi Controller
+ * project:  Intex PureSpa WiFi Controller
  *
- * file:     SBH20IO.h
+ * file:     PureSpaIO.h
  *
  * encoding: UTF-8
  * created:  14th March 2021
@@ -26,8 +26,8 @@
  *
  */
 
-#ifndef SBH20IO_H
-#define SBH20IO_H
+#ifndef PURE_SPA_IO_H
+#define PURE_SPA_IO_H
 
 #include <c_types.h>
 #include <WString.h>
@@ -77,33 +77,34 @@
  *
  * telegram order:
  *
- * 32 frames, repeating every 21 ms (5x digit 1-4, 5x LEDs, 1x buttons 1-7)
+ * 25 cue frames and 32/34 data frames (5x digit 1-4, 5x LEDs, 1x buttons 1-7/9), repeating every 21 ms
  *
- * CD1
- * CD2
- * CD3
- * CD4
- * CL
- * CD1
- * CD2
- * CD3
- * CD4
- * CL
- * CD1
- * CD2
- * CD3
- * CD4
- * CL
- * CD1
- * CD2
- * CD3
- * CD4
- * CL
- * CD1
- * CD2
- * CD3
- * CD4
- * CBBBBBBBL
+ * C D1
+ * C D2
+ * C D3
+ * C D4
+ * C L
+ * C D1
+ * C D2
+ * C D3
+ * C D4
+ * C L
+ * C D1
+ * C D2
+ * C D3
+ * C D4
+ * C L
+ * C D1
+ * C D2
+ * C D3
+ * C D4
+ * C L
+ * C D1
+ * C D2
+ * C D3
+ * C D4
+ * C BBBBBBB L   [SB-H20]
+ * C BBBBBBBBB L [SJB-HS]
  *
  *
  * Build Notes:
@@ -127,14 +128,22 @@
  *
  */
 
-class SBH20IO
+class PureSpaIO
 {
 public:
+  enum MODEL
+  {
+    SBH20 = 1,
+    SJBHS = 2
+  };
+
   class UNDEF
   {
   public:
-    static const uint8 BOOL     = 0xFF;
-    static const uint16 USHORT = 0xFFFF;
+    static const uint8  BOOL   = UCHAR_MAX;
+    static const uint16 USHORT = USHRT_MAX;
+    static const uint32 UINT   = UINT_MAX;
+    static const sint32 INT    = -99;
   };
 
   class WATER_TEMP
@@ -149,27 +158,35 @@ public:
   void loop();
 
 public:
+  MODEL getModel() const;
+  const char* getModelName() const;
+
   bool isOnline() const;
 
   int getActWaterTempCelsius() const;
   int getDesiredWaterTempCelsius() const;
+  int getDisinfectionTime() const;
 
   uint8 isBubbleOn() const;
+  uint8 isBuzzerOn() const;
+  uint8 isDisinfectionOn() const;
   uint8 isFilterOn() const;
   uint8 isHeaterOn() const;
   uint8 isHeaterStandby() const;
+  uint8 isJetOn() const;
   uint8 isPowerOn() const;
-  uint8 isBuzzerOn() const;
 
   void setDesiredWaterTempCelsius(int temp);
+  void setDisinfectionTime(int hours);
 
   void setBubbleOn(bool on);
   void setFilterOn(bool on);
   void setHeaterOn(bool on);
+  void setJetOn(bool on);
   void setPowerOn(bool on);
 
-  unsigned int getErrorValue() const;
-  String getErrorMessage(unsigned int errorValue) const;
+  String getErrorCode() const;
+  String getErrorMessage(const String& errorCode) const;
 
   unsigned int getRawLedValue() const;
 
@@ -177,72 +194,76 @@ public:
   unsigned int getDroppedFrames() const;
 
 private:
-
   class CYCLE
   {
   public:
-    static const unsigned int TOTAL_FRAMES    = 32; // number of frames in each cycle
-    static const unsigned int DISPLAY_FRAMES  = 5;  // number of digit frame groups in each cycle
-    static const unsigned int PERIOD          = 21; // ms, period of frame cycle
+#if defined MODEL_SB_H20
+    static const unsigned int BUTTON_FRAMES = 7; // number of button frames in each cycle
+#elif defined MODEL_SJB_HS
+    static const unsigned int BUTTON_FRAMES = 9; // number of button frames in each cycle
+#endif
+    static const unsigned int TOTAL_FRAMES = 25 + BUTTON_FRAMES; // number of frames in each cycle
+    static const unsigned int DISPLAY_FRAME_GROUPS =  5; // number of digit frame groups in each cycle
+    static const unsigned int PERIOD = 21; // ms, period of frame cycle @todo might be longer for SJB-HS
     static const unsigned int RECEIVE_TIMEOUT = 50*CYCLE::PERIOD; // ms
   };
 
   class FRAME
   {
   public  :
-    static const unsigned int BITS = 16;
+    static const unsigned int BITS = 16; // bits per frame
     static const unsigned int FREQUENCY = CYCLE::TOTAL_FRAMES/CYCLE::PERIOD; // frames/ms
   };
 
   class BLINK
   {
   public:
-    static const unsigned int PERIOD         = 500; // ms, temp will blink 8 times in 4000 ms
-    static const unsigned int TEMP_FRAMES    = PERIOD/4*FRAME::FREQUENCY; // sample duration of desired temp after blank display
+    static const unsigned int PERIOD = 500; // ms, temp will blink 8 times in 4000 ms
+    static const unsigned int TEMP_FRAMES = PERIOD/4*FRAME::FREQUENCY; // sample duration of desired temp after blank display
     static const unsigned int STOPPED_FRAMES = 2*PERIOD*FRAME::FREQUENCY; // must be longer than single blink duration
   };
 
   class CONFIRM_FRAMES
   {
   public:
-    static const unsigned int LED            = 3;
-    static const unsigned int DISP           = 3;
-    static const unsigned int WATER_TEMP_SET = 3;
-    static const unsigned int WATER_TEMP_ACT = BLINK::PERIOD/2*FRAME::FREQUENCY/CYCLE::DISPLAY_FRAMES; // ms, must be high enough to tell from blinking
+    static const unsigned int REGULAR = 3; // frames, for values which do not blink
+    static const unsigned int NOT_BLINKING = BLINK::PERIOD/2*FRAME::FREQUENCY/CYCLE::DISPLAY_FRAME_GROUPS; // frames, must be high enough to tell from blinking
   };
 
   class BUTTON
   {
   public:
-    static const unsigned int PRESS_COUNT       = BLINK::PERIOD/CYCLE::PERIOD - 2; // must be long enough to trigger, but short enough to avoid double trigger
-    static const unsigned int ACK_CHECK_PERIOD  = 10; // ms
-    static const unsigned int ACK_TIMEOUT       = 2*PRESS_COUNT*CYCLE::PERIOD; // ms
+    static const unsigned int PRESS_COUNT = BLINK::PERIOD/CYCLE::PERIOD; // cycles, must be long enough to activate buzzer
+    static const unsigned int PRESS_SHORT_COUNT = 380/CYCLE::PERIOD; // cycles, must be long enough to trigger, but short enough to avoid double trigger
+    static const unsigned int ACK_CHECK_PERIOD = 10; // ms
+    static const unsigned int ACK_TIMEOUT = 2*PRESS_COUNT*CYCLE::PERIOD; // ms
   };
 
 private:
   struct State
   {
-    uint16 waterTemp   = UNDEF::USHORT;
-    uint16 desiredTemp = UNDEF::USHORT;
-    uint16 ledStatus   = UNDEF::USHORT;
+    uint32 waterTemp        = UNDEF::UINT; // ASCII, 4 chars, includes unit
+    uint32 desiredTemp      = UNDEF::UINT; // ASCII, 4 chars, includes unit
+    uint32 disinfectionTime = UNDEF::UINT; // ASCII, 4 chars, includes unit
+    uint32 error            = ERROR_NONE;  // ASCII, 3 chars, null terminated, requires power cycle to reset
+
+    uint16 ledStatus        = UNDEF::USHORT;
 
     bool buzzer = false;
-    uint16 error = 0;
-    unsigned int lastErrorChangeFrameCounter = 0;
-
     bool online = false;
     bool stateUpdated = false;
 
+    unsigned int lastErrorChangeFrameCounter = 0;
     unsigned int frameCounter = 0;
     unsigned int frameDropped = 0;
   };
 
   struct IsrState
   {
-    uint16 latestWaterTemp    = UNDEF::USHORT;
-    uint16 latestBlinkingTemp = UNDEF::USHORT;
-    uint16 latestLedStatus    = UNDEF::USHORT;
-    uint8 latestTempUnit      = 0;
+    uint32 latestWaterTemp        = UNDEF::UINT;
+    uint32 latestBlinkingTemp     = UNDEF::UINT;
+    uint32 latestDisinfectionTime = UNDEF::UINT;
+    uint16 latestLedStatus = UNDEF::USHORT;
 
     uint16 frameValue = 0;
     uint16 receivedBits = 0;
@@ -250,16 +271,17 @@ private:
     unsigned int lastBlankDisplayFrameCounter = 0;
     unsigned int blankCounter = 0;
 
-    unsigned int stableDisplayValueCount     = CONFIRM_FRAMES::DISP;
-    unsigned int stableDisplayBlankCount     = CONFIRM_FRAMES::DISP;
-    unsigned int stableWaterTempCount        = CONFIRM_FRAMES::WATER_TEMP_ACT;
+    unsigned int stableDisplayValueCount      = CONFIRM_FRAMES::REGULAR;
+    unsigned int stableDisplayBlankCount      = CONFIRM_FRAMES::REGULAR;
+    unsigned int stableWaterTempCount         = CONFIRM_FRAMES::NOT_BLINKING;
     unsigned int stableBlinkingWaterTempCount = 0;
-    unsigned int stableLedStatusCount        = CONFIRM_FRAMES::LED;
+    unsigned int stableDisinfectionTimeCount  = CONFIRM_FRAMES::REGULAR;
+    unsigned int stableLedStatusCount         = CONFIRM_FRAMES::REGULAR;
 
-    uint16 displayValue       = UNDEF::USHORT;
-    uint16 latestDisplayValue = UNDEF::USHORT;
+    uint32 displayValue       = UNDEF::UINT;
+    uint32 latestDisplayValue = UNDEF::UINT;
 
-    uint16 receivedDigits = 0;
+    uint8 receivedDigits = 0;
 
     bool isDisplayBlinking = false;
 
@@ -268,47 +290,53 @@ private:
 
   struct Buttons
   {
-    unsigned int toggleBubble   = 0;
-    unsigned int toggleFilter   = 0;
-    unsigned int toggleHeater   = 0;
-    unsigned int togglePower    = 0;
-    unsigned int toggleTempUp   = 0;
-    unsigned int toggleTempDown = 0;
+    unsigned int toggleBubble       = 0;
+    unsigned int toggleDisinfection = 0;
+    unsigned int toggleFilter       = 0;
+    unsigned int toggleHeater       = 0;
+    unsigned int toggleJet          = 0;
+    unsigned int togglePower        = 0;
+    unsigned int toggleTempUp       = 0;
+    unsigned int toggleTempDown     = 0;
   };
 
 private:
+  static const uint32 ERROR_NONE = 0;
+
+private:
   // ISR and ISR helper
-  static ICACHE_RAM_ATTR void clockRisingISR(void* arg);
-  static ICACHE_RAM_ATTR inline void decodeDisplay();
-  static ICACHE_RAM_ATTR inline void decodeLED();
-  static ICACHE_RAM_ATTR inline void decodeButton();
-/*
-  ICACHE_RAM_ATTR inline void decodeDisplay();
-  ICACHE_RAM_ATTR inline void decodeLED();
-  ICACHE_RAM_ATTR inline void decodeButton();
-*/
+  static IRAM_ATTR void clockRisingISR(void* arg);
+  static IRAM_ATTR inline void decodeDisplay();
+  static IRAM_ATTR inline void decodeLED();
+  static IRAM_ATTR inline void decodeButton();
+  static IRAM_ATTR inline void updateButtonState(volatile unsigned int& buttonPressCount);
 
 private:
   // ISR variables
   static volatile State state;
   static volatile IsrState isrState;
   static volatile Buttons buttons;
-/*
-  volatile State state;
-  volatile IsrState isrState;
-  volatile Buttons buttons;
- */
 
 private:
-  uint16 convertDisplayToCelsius(uint16 value) const;
+  int convertDisplayToCelsius(uint32 value) const;
   bool waitBuzzerOff() const;
   bool pressButton(volatile unsigned int& buttonPressCount);
   bool changeWaterTemp(int up);
 
 private:
+#if defined MODEL_SB_H20
+  MODEL model = MODEL::SBH20;
+#elif defined MODEL_SJB_HS
+  MODEL model = MODEL::SJBHS;
+#else
+  MODEL model;
+  #error no model (MODEL_SB_H20 or MODEL_SJB_HS) selected in common.h
+#endif
+
+private:
   LANG language;
   unsigned long lastStateUpdateTime = 0;
+  char errorBuffer[4];
 };
 
-#endif /* SBH20IO_H */
-
+#endif /* PURE_SPA_IO_H */

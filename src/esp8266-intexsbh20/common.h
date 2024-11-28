@@ -1,5 +1,5 @@
 /*
- * project:  Intex PureSpa SB-H20 WiFi Controller
+ * project:  Intex PureSpa WiFi Controller
  *
  * file:     common.h
  *
@@ -27,15 +27,32 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#include <limits.h>
+#include <climits>
+#include <c_types.h>
 #include <../d1_mini/pins_arduino.h>
+
+/*****************************************************************************
+
+                       C O N F I G U R A T I O N
+
+ *****************************************************************************/
+
+// select Intex PureSpa model by commenting in the desired variant
+//#define MODEL_SB_H20
+//#define MODEL_SJB_HS
+
+// if changing the water temperature setpoint does not work reliably, commenting
+// in the following option may improve the behaviour at the cost of a short
+// disconnect to the MQTT server
+//#define FORCE_WIFI_SLEEP
 
 //#define SERIAL_DEBUG
 
+/*****************************************************************************/
+
 namespace CONFIG
 {
-  const char POOL_MODEL_NAME[] = "Intex PureSpa SB-H20";
-  const char WIFI_VERSION[]    = "1.0.2.1"; // 10.07.2022
+  const char WIFI_VERSION[] = "1.0.8.1"; // 22.08.2023
 
   // WiFi parameters
   const unsigned long WIFI_MAX_DISCONNECT_DURATION = 900000; // [ms] 5 min until reboot
@@ -56,6 +73,7 @@ namespace CONFIG_TAG
   const char WIFI_OTA_URL[]    = "firmwareURL";
 
   const char MQTT_SERVER[]     = "mqttServer";
+  const char MQTT_PORT[]       = "mqttPort";
   const char MQTT_USER[]       = "mqttUser";
   const char MQTT_PASSWORD[]   = "mqttPassword";
   const char MQTT_RETAIN[]     = "mqttRetain";
@@ -66,28 +84,32 @@ namespace CONFIG_TAG
 namespace MQTT_TOPIC
 {
   // publish
-  const char BUBBLE[]     = "pool/bubble";
-  const char ERROR[]      = "pool/error";
-  const char FILTER[]     = "pool/filter";
-  const char HEATER[]     = "pool/heater";
-  const char MODEL[]      = "pool/model";
-  const char POWER[]      = "pool/power";
-  const char WATER_ACT[]  = "pool/water/tempAct";
-  const char WATER_SET[]  = "pool/water/tempSet";
-  const char VERSION[]    = "wifi/version";
-  const char IP[]         = "wifi/ip";
-  const char RSSI[]       = "wifi/rssi";
-  const char WIFI_TEMP[]  = "wifi/temp";
-  const char STATE[]      = "wifi/state";
-  const char OTA[]        = "wifi/update";
+  const char BUBBLE[]       = "pool/bubble";
+  const char DISINFECTION[] = "pool/disinfection"; // SJB-HS only
+  const char ERROR[]        = "pool/error";
+  const char FILTER[]       = "pool/filter";
+  const char HEATER[]       = "pool/heater";
+  const char JET[]          = "pool/jet"; // SJB-HS only
+  const char MODEL[]        = "pool/model";
+  const char POWER[]        = "pool/power";
+  const char WATER_ACT[]    = "pool/water/tempAct";
+  const char WATER_SET[]    = "pool/water/tempSet";
+  const char VERSION[]      = "wifi/version";
+  const char IP[]           = "wifi/ip";
+  const char RSSI[]         = "wifi/rssi";
+  const char WIFI_TEMP[]    = "wifi/temp";
+  const char STATE[]        = "wifi/state";
+  const char OTA[]          = "wifi/update";
 
   // subscribe
-  const char CMD_BUBBLE[] = "pool/command/bubble";
-  const char CMD_FILTER[] = "pool/command/filter";
-  const char CMD_HEATER[] = "pool/command/heater";
-  const char CMD_POWER[]  = "pool/command/power";
-  const char CMD_WATER[]  = "pool/command/water/tempSet";
-  const char CMD_OTA[]    = "wifi/command/update";
+  const char CMD_BUBBLE[]       = "pool/command/bubble";
+  const char CMD_DISINFECTION[] = "pool/command/disinfection"; // SJB-HS only
+  const char CMD_FILTER[]       = "pool/command/filter";
+  const char CMD_HEATER[]       = "pool/command/heater";
+  const char CMD_JET[]          = "pool/command/jet"; // SJB-HS only
+  const char CMD_POWER[]        = "pool/command/power";
+  const char CMD_WATER[]        = "pool/command/water/tempSet";
+  const char CMD_OTA[]          = "wifi/command/update";
 }
 
 // Languages
@@ -112,7 +134,7 @@ namespace PIN
 #endif
 
 // time delta with overflow support
-static unsigned long timeDiff(unsigned long newTime, unsigned long oldTime)
+static inline unsigned long timeDiff(unsigned long newTime, unsigned long oldTime)
 {
   if (newTime >= oldTime)
   {
@@ -125,7 +147,7 @@ static unsigned long timeDiff(unsigned long newTime, unsigned long oldTime)
 }
 
 // unsigned int delta with overflow support
-static unsigned long diff(unsigned int newVal, unsigned int oldVal)
+static inline unsigned long diff(unsigned int newVal, unsigned int oldVal)
 {
   if (newVal >= oldVal)
   {
